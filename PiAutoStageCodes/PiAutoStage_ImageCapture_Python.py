@@ -5,6 +5,8 @@ Title: PiAutoStage: An Open-Source 3D Printed Tool for the Automatic
 
 Authors: R. Alex Steiner and Tyrone.O. Rooney
 
+Updated by SWM for picamera2
+
 Publications DOI: 
     
 PiAutoStage Image Capture Code
@@ -12,8 +14,9 @@ PiAutoStage Image Capture Code
 """
 
 import serial, time, os
-import picamerax as picamera
+import picamera2 as picamera
 from fractions import Fraction
+from picamera2 import Preview
 
 ##############################################################################
 ################################ USER INPUTS #################################
@@ -21,28 +24,28 @@ from fractions import Fraction
 
 ## HOME POSITION ##
 x_home = 1500
-y_home = 1500
+y_home = 1800
 
 ## NUMBER OF STEPS ALONG AXES ##
 num_x = 19
 num_y = 15
 
 ## STAGE LIMITS ##
-x_ini = 850
-x_max = 2000
+x_ini = 1000
+x_max = 1950
 
-y_ini = 980
-y_max = 1600
+y_ini = 1500
+y_max = 2150
 ## FOCUS POSITION ##
-focus_pos = '13001200'
+focus_pos = '15001900'
 ## four photo parameter positions ##
-a = '11001100' 
-b = '17001100'
-c = '17001300' 
-d = '11001300' 
+a = '13001850' 
+b = '12002000'
+c = '18002000' 
+d = '18001700' 
 
 #### Set the ISO Value ####
-isx = 50
+# isx = 50
 
 ####  Set Image Capture Resolution ####
 res = (2028,1550)
@@ -65,18 +68,96 @@ count = 1000
 ##############################################################################
 
 
-####  Initialize Serial Port and Baude Rate  ####
-ser = serial.Serial('/dev/ttyACM0', 9600)
-print('\n\nSerial port intilized: 5 second delay for Arduino\n')
-#### Gives the Arduino time to intitialize ####
-time.sleep(4)
-#### sends the GoCode to attach the Arduino Pins to the Servos ####
-go = '55551500'
-ser.write(go.encode())
-time.sleep(1)
 
-print('Arduino Ready for Instructions\n')
-time.sleep(1)
+
+##############################################################################
+################## SEM DEFINED FUNCTIONS FOR PICAM2 ##########################
+##############################################################################
+
+def initialize_arduino():
+    ####  Initialize Serial Port and Baude Rate  ####
+    ser = serial.Serial('/dev/ttyACM0', 9600)
+    print('\n\nSerial port intilized: 5 second delay for Arduino\n')
+    #### Gives the Arduino time to intitialize ####
+    time.sleep(4)
+    #### sends the GoCode to attach the Arduino Pins to the Servos ####
+    go = '55551500'
+    ser.write(go.encode())
+    time.sleep(1)
+
+    print('Arduino Ready for Instructions\n')
+    time.sleep(1)
+
+    return ser
+
+
+def create_photo_param_file():
+    ## Creates a text file that photo parameters and image locations will be writen to ##
+    otp = open(os.path.join("photo parameters.txt"), "w")
+    otp.write("Number of columns/X steps: " + str(num_x+1)+ "\n")
+    otp.write("Number of rows/Y steps: " + str(num_y+1)+ "\n")
+    otp.write("Total number of photos: " + str((num_x+1)*(num_y+1))+ "\n")
+
+
+    print("Number of columns/X steps: " + str(num_x+1)+ "\n")
+    time.sleep(1)
+    print("Number of rows/Y steps: " + str(num_y+1)+ "\n")
+    time.sleep(1)
+    print("Total number of photos: " + str((num_x+1)*(num_y+1))+ "\n")
+    time.sleep(1)
+    return otp
+
+
+def get_camera():
+    _camera = picamera.Picamera2()
+    return _camera
+
+
+def initialize_camera_preview(camera):
+    camera_config = camera.create_preview_configuration()
+    camera.configure(camera_config)
+
+def start_camera_preview(camera):
+    camera.start_preview(Preview.QTGL)
+    camera.start()
+
+def stop_camera_preview(camera):
+    camera.stop_preview()
+
+def get_exposure_time(camera):
+    metadata = camera.capture_metadata()
+    return metadata["ExposureTime"]
+
+def get_colourgains(camera):
+    metadata = camera.capture_metadata()
+    return metadata["ColourGains"]
+
+def setup_with_preview(camera, pausetime=2):
+    start_camera_preview(camera)
+    time.sleep(pausetime)
+    _q = get_exposure_time(camera)
+    _g = get_colourgains(camera)
+    stop_camera_preview(camera)
+    return _q, _g
+
+def initialize_camera_still_capture(camera, exposure_time, colour_gains):
+    capture_config = camera.create_still_configuration()
+    camera.configure(capture_config)
+    camera.set_controls({"ExposureTime": exposure_time,
+                         "ColourGains": colour_gains,
+                         "AeEnable": False,
+                         "AwbEnable": False})
+    camera.options["quality"] = 95
+
+def capture_image(camera, filename):
+    camera.capture_file(filename, format='jpeg')
+
+
+##############################################################################
+####################### START RUNNING IMAGE CAPTURE ##########################
+##############################################################################
+
+ser = initialize_arduino()
 
 ## NUMBER OF STEPS AND STEP SIZE CALCUALTED ##
 
@@ -88,19 +169,7 @@ y_step = abs(int((y_max - y_ini) / num_y))
 
 i = 0
 
-## Creates a text file that photo parameters and image locations will be writen to ##
-otp = open(os.path.join("photo parameters.txt"), "w")
-otp.write("Number of columns/X steps: " + str(num_x+1)+ "\n")
-otp.write("Number of rows/Y steps: " + str(num_y+1)+ "\n")
-otp.write("Total number of photos: " + str((num_x+1)*(num_y+1))+ "\n")
-
-
-print("Number of columns/X steps: " + str(num_x+1)+ "\n")
-time.sleep(1)
-print("Number of rows/Y steps: " + str(num_y+1)+ "\n")
-time.sleep(1)
-print("Total number of photos: " + str((num_x+1)*(num_y+1))+ "\n")
-time.sleep(1)
+otp = create_photo_param_file()
 
 ######## FOCUS AND IMAGE PARAMETER SEQUENCE STARTS HERE ########
 
@@ -108,14 +177,21 @@ print('Beginning focus and image parameter sequence. \n')
 print('Moving to focus position at: ' + focus_pos + "\n")
 ser.write(focus_pos.encode())
 
-with picamera.PiCamera() as camera:
-            camera.resolution = res
-            camera.iso = isx
-            camera.start_preview()
-            time.sleep(15)
-            q1 = camera.exposure_speed
-            g = camera.awb_gains
-            camera.stop_preview()
+
+camera = get_camera()
+initialize_camera_preview(camera)
+
+q1, g = setup_with_preview(camera, 15)
+
+
+# with picamera.PiCamera() as camera:
+#             camera.resolution = res
+#             camera.iso = isx
+#             camera.start_preview()
+#             time.sleep(15)
+#             q1 = camera.exposure_speed
+#             g = camera.awb_gains
+#             camera.stop_preview()
 
 print("Focus exposure speed: " + str(q1) + "\n")
 print("Focus AWB gains: " + str(g)+ "\n")
@@ -124,15 +200,19 @@ otp.write("Focus AWB gains: " + str(g)+ "\n")
 
 ser.write(a.encode())
 time.sleep(1)
-with picamera.PiCamera() as camera:
-            camera.resolution = res
-            print("Photo Resolution: " + str(camera.resolution)+ "\n")
-            camera.iso = isx
-            camera.start_preview()
-            time.sleep(2)
-            q2 = camera.exposure_speed
-            g1 = camera.awb_gains
-            camera.stop_preview()
+
+q2, g1 = setup_with_preview(camera, 2)
+
+# with picamera.PiCamera() as camera:
+#             camera.resolution = res
+#             print("Photo Resolution: " + str(camera.resolution)+ "\n")
+#             camera.iso = isx
+#             camera.start_preview()
+#             time.sleep(2)
+#             q2 = camera.exposure_speed
+#             g1 = camera.awb_gains
+#             camera.stop_preview()
+
 print("Position 'a' exposure speed: " + str(q2)+ "\n")
 print("Position 'a' AWB gains: " + str(g1)+ "\n")
 otp.write("Position 'a' exposure speed: " + str(q2)+ "\n")
@@ -140,14 +220,18 @@ otp.write("Position 'a' AWB gains: " + str(g1)+ "\n")
 
 ser.write(b.encode())
 time.sleep(1)
-with picamera.PiCamera() as camera:
-            camera.resolution = res
-            camera.iso = isx
-            camera.start_preview()
-            time.sleep(2)
-            q3 = camera.exposure_speed
-            g2 = camera.awb_gains
-            camera.stop_preview()
+
+q3, g2 = setup_with_preview(camera, 2)
+
+
+# with picamera.PiCamera() as camera:
+#             camera.resolution = res
+#             camera.iso = isx
+#             camera.start_preview()
+#             time.sleep(2)
+#             q3 = camera.exposure_speed
+#             g2 = camera.awb_gains
+#             camera.stop_preview()
             
 print("Position 'b' exposure speed: " + str(q3)+ "\n")
 print("Position 'b' AWB gains: " + str(g2)+ "\n")
@@ -156,14 +240,18 @@ otp.write("Position 'b' AWB gains: " + str(g2)+ "\n")
 
 ser.write(c.encode())
 time.sleep(1)
-with picamera.PiCamera() as camera:
-            camera.resolution = res
-            camera.iso = isx
-            camera.start_preview()
-            time.sleep(2)
-            q4 = camera.exposure_speed
-            g3 = camera.awb_gains
-            camera.stop_preview()
+
+q4, g3 = setup_with_preview(camera, 2)
+
+
+# with picamera.PiCamera() as camera:
+#             camera.resolution = res
+#             camera.iso = isx
+#             camera.start_preview()
+#             time.sleep(2)
+#             q4 = camera.exposure_speed
+#             g3 = camera.awb_gains
+#             camera.stop_preview()
 print("Position 'c' exposure speed: " + str(q4)+ "\n")
 print("Position 'c' AWB gains: " + str(g3)+ "\n")
 otp.write("Position 'c' exposure speed: " + str(q4)+ "\n")
@@ -171,14 +259,19 @@ otp.write("Position 'c' AWB gains: " + str(g3)+ "\n")
 
 ser.write(d.encode())
 time.sleep(1)
-with picamera.PiCamera() as camera:
-            camera.resolution = res
-            camera.iso = isx
-            camera.start_preview()
-            time.sleep(2)
-            q5 = camera.exposure_speed
-            g4 = camera.awb_gains
-            camera.stop_preview()
+
+q5, g4 = setup_with_preview(camera, 2)
+
+
+# with picamera.PiCamera() as camera:
+#             camera.resolution = res
+#             camera.iso = isx
+#             camera.start_preview()
+#             time.sleep(2)
+#             q5 = camera.exposure_speed
+#             g4 = camera.awb_gains
+#             camera.stop_preview()
+
 print("Position 'd' exposure speed: " + str(q5)+ "\n")
 print("Position 'd' AWB gains: " + str(g4)+ "\n")
 otp.write("Position 'd' exposure speed: " + str(q5)+ "\n")
@@ -252,17 +345,27 @@ while i <= num_x:
         #print(coord1)
         otp.write("Location of picture " + str(count) + " is at X= " + str(x1) + " and Y= " + str(y1)+ "\n")
         ser.write(coord1.encode())
-        with picamera.PiCamera() as camera:
-            camera.iso = isx
-            camera.resolution = res
-            time.sleep(1)
-            camera.shutter_speed = q
-            camera.exposure_mode = 'off'
-            camera.awb_mode = 'off'
-            camera.awb_gains = g
-            filename = str(count) + '.jpg'
-            camera.capture(filename)
-            count = count + 1
+
+        initialize_camera_still_capture(camera, q, g)
+
+        time.sleep(1)
+        filename = str(count) + '.jpg'
+        capture_image(camera, filename)
+        count = count + 1
+
+
+        # with picamera.PiCamera() as camera:
+        #     camera.iso = isx
+        #     camera.resolution = res
+        #     time.sleep(1)
+        #     camera.shutter_speed = q
+        #     camera.exposure_mode = 'off'
+        #     camera.awb_mode = 'off'
+        #     camera.awb_gains = g
+        #     filename = str(count) + '.jpg'
+        #     camera.capture(filename)
+        #     count = count + 1
+
         y = y - y_step
         j = j + 1
     
