@@ -142,7 +142,7 @@ def setup_with_preview(camera, pausetime=2):
 
 def initialize_camera_still_capture(camera, exposure_time, colour_gains):
     capture_config = camera.create_still_configuration()
-    camera.configure(capture_config)
+    camera.switch_mode(capture_config)
     camera.set_controls({"ExposureTime": exposure_time,
                          "ColourGains": colour_gains,
                          "AeEnable": False,
@@ -286,9 +286,9 @@ q=min(qout)
 print(qout)
 print(q)
 otp.write("Min exposure speed set: " + str(q)+ "\n")
-otp.write("Camera ISO value set: " + str(isx) + "\n")
+# otp.write("Camera ISO value set: " + str(isx) + "\n")
 print("Min exposure speed set: " + str(q)+ "\n")
-print("Camera ISO value set: " + str(isx) + "\n")
+# print("Camera ISO value set: " + str(isx) + "\n")
 
 
 ###### IMAGE CAPTURE PARAMETERS ARE AUTOMATICALLY SET HERE ######
